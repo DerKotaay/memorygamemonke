@@ -1,0 +1,312 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Flashcard & Memory Game</title>
+  <style>
+    :root {
+      --bg: #111;
+      --text: #eee;
+      --card-bg: #222;
+      --card-text: #fff;
+      --green: #2ecc71;
+      --red: #e74c3c;
+    }
+
+    body.light {
+      --bg: #f5f5f5;
+      --text: #222;
+      --card-bg: #fff;
+      --card-text: #000;
+    }
+
+    body {
+      margin: 0;
+      font-family: sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 20px;
+    }
+
+    h1 {
+      margin: 10px 0;
+    }
+
+    .hidden { display: none; }
+
+    input[type="file"], button {
+      padding: 10px 15px;
+      font-size: 16px;
+      margin: 5px;
+    }
+
+    #flashcardView, #memoryView, #endScreen {
+      max-width: 600px;
+      width: 100%;
+    }
+
+    #flashcardBox {
+      margin: 20px auto;
+      width: 100%;
+      height: 200px;
+      background: var(--card-bg);
+      color: var(--card-text);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      border-radius: 10px;
+      box-shadow: 0 0 10px rgba(0,0,0,0.3);
+      text-align: center;
+      padding: 20px;
+      cursor: pointer;
+    }
+
+    .nav {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-top: 10px;
+    }
+
+    #game {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+      gap: 15px;
+      margin-top: 20px;
+    }
+
+    .card {
+      background: var(--card-bg);
+      color: var(--card-text);
+      padding: 20px;
+      border-radius: 8px;
+      text-align: center;
+      cursor: pointer;
+      transition: all 0.3s;
+      box-shadow: 0 0 5px rgba(0,0,0,0.3);
+    }
+
+    .card.selected {
+      background: var(--green);
+    }
+
+    .card.wrong {
+      background: var(--red);
+    }
+
+    .card.matched {
+      opacity: 0;
+      pointer-events: none;
+      transform: scale(0);
+      transition: opacity 0.3s, transform 0.3s;
+    }
+
+    #timer, #bestTime {
+      margin: 10px 0;
+      font-size: 18px;
+    }
+
+    #endScreen button {
+      margin: 10px;
+    }
+
+    #controls, #memoryControls {
+      margin-top: 20px;
+    }
+  </style>
+</head>
+<body class="dark">
+  <h1>🧠 Flashcard & Memory Game</h1>
+
+  <audio id="apeSound" src="ape.mp3" preload="auto"></audio>
+
+  <div id="home">
+    <input type="file" id="fileInput" accept=".txt" />
+    <div id="controls">
+      <button onclick="startFlashcard()">📘 Flashcard Mode</button>
+      <button onclick="startMemoryGame()">🧩 Memory Game</button>
+      <button onclick="toggleTheme()">🌓 Toggle Theme</button>
+    </div>
+  </div>
+
+  <div id="flashcardView" class="hidden">
+    <div id="flashcardBox" onclick="flipFlashcard()">Click to flip</div>
+    <div class="nav">
+      <button onclick="prevCard()">⬅️ Back</button>
+      <span id="flashcardCounter">Card 1 of 1</span>
+      <button onclick="nextCard()">➡️ Next</button>
+    </div>
+    <button onclick="goHome()">🔙 Return to Home</button>
+  </div>
+
+  <div id="memoryView" class="hidden">
+    <div id="timer">⏱ Time: 0s</div>
+    <div id="bestTime">🏆 Best: --</div>
+    <div id="game"></div>
+  </div>
+
+  <div id="endScreen" class="hidden">
+    <div id="status"></div>
+    <div id="memoryControls">
+      <button onclick="startMemoryGame()">🔁 Retry</button>
+      <button onclick="goHome()">🏠 Home</button>
+    </div>
+  </div>
+
+  <script>
+    let cards = [];
+    let currentCard = 0;
+    let showingFront = true;
+    let flippedCards = [];
+    let startTime = 0;
+    let timer;
+    let bestTime = localStorage.getItem("bestTime") || null;
+
+    document.getElementById("fileInput").addEventListener("change", e => {
+      const file = e.target.files[0];
+      const reader = new FileReader();
+      reader.onload = evt => {
+        const lines = evt.target.result.split(/\r?\n/).filter(l => l.includes(" - "));
+        cards = lines.map(line => {
+          const [term, def] = line.split(" - ");
+          return { term: term.trim(), def: def.trim() };
+        });
+        alert("✅ File loaded! Choose a mode.");
+      };
+      reader.readAsText(file);
+    });
+
+    function goHome() {
+      ["home", "flashcardView", "memoryView", "endScreen"].forEach(id =>
+        document.getElementById(id).classList.add("hidden")
+      );
+      document.getElementById("home").classList.remove("hidden");
+      clearInterval(timer);
+    }
+
+    function toggleTheme() {
+      document.body.classList.toggle("light");
+    }
+
+    // Flashcard
+    function startFlashcard() {
+      if (!cards.length) return alert("Please load a .txt file first.");
+      document.getElementById("home").classList.add("hidden");
+      document.getElementById("flashcardView").classList.remove("hidden");
+      currentCard = 0;
+      showingFront = true;
+      updateFlashcard();
+    }
+
+    function updateFlashcard() {
+      const card = cards[currentCard];
+      document.getElementById("flashcardBox").textContent = showingFront ? card.term : card.def;
+      document.getElementById("flashcardCounter").textContent = `Card ${currentCard + 1} of ${cards.length}`;
+    }
+
+    function flipFlashcard() {
+      showingFront = !showingFront;
+      updateFlashcard();
+    }
+
+    function nextCard() {
+      if (currentCard < cards.length - 1) {
+        currentCard++;
+        showingFront = true;
+        updateFlashcard();
+      }
+    }
+
+    function prevCard() {
+      if (currentCard > 0) {
+        currentCard--;
+        showingFront = true;
+        updateFlashcard();
+      }
+    }
+
+    // Memory Game
+    function startMemoryGame() {
+      if (!cards.length) return alert("Please load a .txt file first.");
+      document.getElementById("home").classList.add("hidden");
+      document.getElementById("memoryView").classList.remove("hidden");
+      document.getElementById("endScreen").classList.add("hidden");
+      document.getElementById("game").innerHTML = "";
+      flippedCards = [];
+
+      const selected = shuffle(cards).slice(0, 10);
+      const deck = shuffle([...selected.map((c, i) => ({ id: i, content: c.term })), ...selected.map((c, i) => ({ id: i, content: c.def }))]);
+
+      for (const item of deck) {
+        const div = document.createElement("div");
+        div.className = "card";
+        div.textContent = item.content;
+        div.dataset.id = item.id;
+        div.onclick = () => handleCardClick(div);
+        document.getElementById("game").appendChild(div);
+      }
+
+      startTime = 0;
+      updateTimer();
+      clearInterval(timer);
+      timer = setInterval(() => {
+        startTime++;
+        updateTimer();
+      }, 1000);
+    }
+
+    function handleCardClick(card) {
+      if (card.classList.contains("matched") || flippedCards.includes(card)) return;
+      card.classList.add("selected");
+      flippedCards.push(card);
+      if (flippedCards.length === 2) {
+        const [a, b] = flippedCards;
+        if (a.dataset.id === b.dataset.id) {
+          a.classList.add("matched");
+          b.classList.add("matched");
+          document.getElementById("apeSound").play();
+          flippedCards = [];
+          checkGameEnd();
+        } else {
+          a.classList.add("wrong");
+          b.classList.add("wrong");
+          setTimeout(() => {
+            a.classList.remove("wrong", "selected");
+            b.classList.remove("wrong", "selected");
+            flippedCards = [];
+          }, 700);
+        }
+      }
+    }
+
+    function checkGameEnd() {
+      if (document.querySelectorAll(".card:not(.matched)").length === 0) {
+        clearInterval(timer);
+        document.getElementById("memoryView").classList.add("hidden");
+        document.getElementById("endScreen").classList.remove("hidden");
+        const status = `🎉 Finished in ${startTime}s`;
+        if (!bestTime || startTime < bestTime) {
+          bestTime = startTime;
+          localStorage.setItem("bestTime", bestTime);
+          document.getElementById("status").textContent = `${status} 🏆 New best time!`;
+        } else {
+          document.getElementById("status").textContent = `${status}`;
+        }
+      }
+    }
+
+    function updateTimer() {
+      document.getElementById("timer").textContent = `⏱ Time: ${startTime}s`;
+      document.getElementById("bestTime").textContent = bestTime ? `🏆 Best: ${bestTime}s` : "🏆 Best: --";
+    }
+
+    function shuffle(arr) {
+      return arr.sort(() => Math.random() - 0.5);
+    }
+  </script>
+</body>
+</html>
